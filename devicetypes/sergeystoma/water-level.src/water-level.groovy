@@ -20,6 +20,7 @@ metadata {
         capability "Configuration"
  
 		attribute "level", "number"
+        attribute "status", "string"
 	}
 
 	simulator {
@@ -32,12 +33,17 @@ metadata {
 	            attributeState("wet", label:'wet', icon:"st.alarm.water.wet", backgroundColor:"#53a7c0")
             }
         }
-        valueTile("level", "device.level", decoration: "flat", width: 2, height: 2) {
+        valueTile("level", "device.level", decoration: "flat", width: 4, height: 2) {
             state("level", label:'${currentValue}cm depth')
+        }
+        standardTile("status", "device.status", width: 2, height: 2) {
+	        state("idle", label:'idle', backgroundColor:"#44b621")
+            state("soon", label:'soon', backgroundColor:"#f1d801")
+            state("fail", label:'fail', backgroundColor:"#bc2323")
         }
 
 		main("water")
-        details(["water", "level"])
+        details(["water", "level", "status"])
 	}
     
     preferences {
@@ -47,6 +53,9 @@ metadata {
 		}
 		section {
 			input("safeDepth", "number", title: "What is maximum safe water depth?", description: "Safe water depth in centimeters", range: "0..*", displayDuringSetup: true)
+		}
+        section {
+			input("warnDepth", "number", title: "What is expected depth at which pump would trigger?", description: "Trigger depth in centimeters", range: "0..*", displayDuringSetup: true)
 		}
 	}
 }
@@ -69,6 +78,21 @@ def parse(String description) {
                 if (safeDepth) {
                 	def safeDepthValue = safeDepth as int;
                     def waterStatus = depth <= safeDepthValue ? "dry" : "wet";
+                    
+                    if (warnDepth) {
+                    	def warnStatus;
+                        if (depth <= (warnDepth as int)) {
+                        	warnStatus = "idle";
+                        } else if (depth <= safeDepthValue) {
+                        	warnStatus = "soon";
+                        } else {
+                        	warnStatus = "fail";
+                        }
+
+                        events.push(createEvent(name: "status", value: warnStatus, descriptionText: "$device.displayName expanded status is $waterStatus"))
+                    } else {
+                    	events.push(createEvent(name: "status", value: waterStatus == "dry" ? "idle" : "fail", descriptionText: "$device.displayName expanded status is $waterStatus"))
+                    }
                     
                     events.push(createEvent(name: "water", value: waterStatus, descriptionText: "$device.displayName is $waterStatus"))
                 } else {
@@ -96,8 +120,12 @@ def updateConfiguration() {
     if (safeDepth) {
     	depth = safeDepth as int;
     }
+    def warn = 0;
+    if (warnDepth) {
+    	warn = warnDepth as int;
+    }
     
- 	def config = "cnfg $floor $depth";
+ 	def config = "cnfg $floor $depth $warn";
     def msg = zigbee.smartShield(text: config).format();
         
     return msg

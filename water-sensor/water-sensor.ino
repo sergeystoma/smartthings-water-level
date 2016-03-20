@@ -5,7 +5,7 @@
 #include "SmartThings.h"
 
 #define DEBUG_ENABLED      1
-// #define DEBUG_RAW_ENABLED  1
+#define DEBUG_RAW_ENABLED  1
 
 #define PIN_THING_RX       3
 #define PIN_THING_TX       2
@@ -60,6 +60,11 @@ public:
   int size() 
   {
     return _size;  
+  }
+
+  void invalidate()
+  {
+    _size = 0;
   }
 
   bool valid() 
@@ -163,37 +168,34 @@ void loop() {
       Serial.println("");
 #endif  
 
-      if (time - lastUpdate > 2500) 
-      {
-        if (lastDistance != cm) {
-          lastDistance = cm;
-  
-  #ifdef DEBUG_ENABLED       
-          Serial.print("Ping: ");
-          Serial.print(cm);
-          Serial.println("cm");
-  #endif        
-  
-          if (settings.floorLevel > 0 && settings.safeDepth > 0) {
-            int depth = settings.floorLevel - cm;
-  
-            if (depth <= settings.warnDepth) {
-              smartthing.shieldSetLED(0, 4, 0);
+      if (abs(lastDistance - cm) > 1) {
+        lastDistance = cm;
+
+#ifdef DEBUG_ENABLED       
+        Serial.print("Ping: ");
+        Serial.print(cm);
+        Serial.println("cm");
+#endif        
+
+        if (settings.floorLevel > 0 && settings.safeDepth > 0) {
+          int depth = settings.floorLevel - cm;
+
+          if (depth <= settings.warnDepth) {
+            smartthing.shieldSetLED(0, 4, 0);
+          } else {
+            if (depth <= settings.safeDepth) {
+              smartthing.shieldSetLED(6, 4, 0); 
             } else {
-              if (depth <= settings.safeDepth) {
-                smartthing.shieldSetLED(6, 4, 0); 
-              } else {
-                smartthing.shieldSetLED(8, 0, 0);               
-              }
+              smartthing.shieldSetLED(8, 0, 0);               
             }
           }
-  
-          snprintf(message, sizeof(message), "level:%d", cm);
-          smartthing.send(message);
-  
-          lastUpdate = time;
-        }        
-      }
+        }
+
+        snprintf(message, sizeof(message), "level:%d", cm);
+        smartthing.send(message);
+
+        measurements.invalidate();
+      }        
     }
     
     lastCheck = time;

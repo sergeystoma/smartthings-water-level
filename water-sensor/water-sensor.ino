@@ -5,7 +5,8 @@
 #include "SmartThings.h"
 
 #define DEBUG_ENABLED      1
-#define DEBUG_RAW_ENABLED  1
+#define DEBUG_RAW_ENABLED  0
+#define SUBMIT_TO_ST       1
 
 #define PIN_THING_RX       3
 #define PIN_THING_TX       2
@@ -47,27 +48,28 @@ template <int T> class Queue
 public:
   int _size;
   int _v[T];
-  int _sorted[T];
+  int _average;
 
 public:
   Queue() 
   {
     _size = 0;
+    _average = 0;
     
     memset(&_v, 0, sizeof(_v));
   }
 
-  int size() 
+  inline int size() 
   {
     return _size;  
   }
 
-  void invalidate()
+  inline void invalidate()
   {
     _size = 0;
   }
 
-  bool valid() 
+  inline bool valid() 
   {
     return size() == T;
   }
@@ -89,27 +91,34 @@ public:
         _size = T;
       }
     }
+
+    update_average();
   }
 
-  int average() 
+  inline int* values() 
   {
-    memcpy(&_sorted, &_v, sizeof(_v)); 
+    return _v;  
+  } 
 
-    qsort(&_sorted, T, sizeof(int), compare_int);
-
-    int s = 0;
-
-    for (int i = 2; i < T - 2; ++i) 
+  void update_average() 
+  {
+    float v = 0;
+    for (int i = 0; i < T; ++i) 
     {
-      s += _sorted[i];
+      v += _v[i];
     }
 
-    return s / (T - 2 - 2);
+    _average = (int)(v / T);
+  }
+
+  inline int average() 
+  {
+    return _average;
   }
 };
 
-Queue<12> measurements;
-int lastDistance = 0;
+Queue<40> measurements;
+float lastDistance = 0;
 
 int lastLedState = 0;
 unsigned long lastCheck = 0;
@@ -146,7 +155,7 @@ void setup() {
 void loop() {
   unsigned long time = millis();
 
-  if (time - lastCheck > 100) {
+  if (time - lastCheck > 250) {
     lastLedState = !lastLedState;    
     digitalWrite(PIN_WORKING_LED, lastLedState ? HIGH : LOW);
 
@@ -154,31 +163,47 @@ void loop() {
 
     if (measurements.valid()) 
     {
-      int cm = round((float)measurements.average() / US_ROUNDTRIP_CM);
+      float cm = (float)measurements.average() / US_ROUNDTRIP_CM;
       
-#ifdef DEBUG_RAW_ENABLED
+#if DEBUG_RAW_ENABLED
       Serial.print("Raw: ");
-      Serial.print((float)measurements.average() / US_ROUNDTRIP_CM);
-      Serial.print("  ::  ");
-      for (int i = 0; i < measurements.size(); ++i) 
+      Serial.print(cm);
+
+      float diff = lastDistance - cm;
+
+      if (diff >= 0) 
       {
-        Serial.print(measurements._sorted[i]);
+        Serial.print(" +");
+      } 
+      else
+      {
         Serial.print(" ");
       }
+
+      Serial.print(diff);
+      
+      Serial.print("  :: Last 10 :: ");
+      
+      for (int i = max(0, measurements.size() - 10); i < measurements.size(); ++i) 
+      {
+        Serial.print((float)measurements.values()[i] / US_ROUNDTRIP_CM);
+        Serial.print(" ");
+      }
+      
       Serial.println("");
 #endif  
 
-      if (abs(lastDistance - cm) > 1) {
+      if (abs(lastDistance - cm) > 0) {
         lastDistance = cm;
 
-#ifdef DEBUG_ENABLED       
+#if DEBUG_ENABLED       
         Serial.print("Ping: ");
         Serial.print(cm);
         Serial.println("cm");
 #endif        
 
         if (settings.floorLevel > 0 && settings.safeDepth > 0) {
-          int depth = settings.floorLevel - cm;
+          int depth = settings.floorLevel - (int)cm;
 
           if (depth <= settings.warnDepth) {
             smartthing.shieldSetLED(0, 4, 0);
@@ -191,10 +216,14 @@ void loop() {
           }
         }
 
-        snprintf(message, sizeof(message), "level:%d", cm);
+#if SUBMIT_TO_ST
+#if DEBUG_ENABLED
+        Serial.print("Update ST...");
+#endif
+        
+        snprintf(message, sizeof(message), "level:%d", (int)cm);
         smartthing.send(message);
-
-        measurements.invalidate();
+#endif        
       }        
     }
     
@@ -208,7 +237,7 @@ void loop() {
 void configure(String& message) {
   sscanf(message.c_str() + 5, "%d %d %d", &settings.floorLevel, &settings.safeDepth, &settings.warnDepth);
 
-#ifdef DEBUG_ENABLED       
+#if DEBUG_ENABLED       
   Serial.print("Configure floor level ");
   Serial.print(settings.floorLevel);
   Serial.print(" and safe depth ");
@@ -222,7 +251,7 @@ void configure(String& message) {
 
 void messageCallout(String message)
 {
-#ifdef DEBUG_ENABLED
+#if DEBUG_ENABLED
     Serial.print("Received message: '");
     Serial.print(message);
     Serial.println("' ");

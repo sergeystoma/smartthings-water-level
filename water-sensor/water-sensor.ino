@@ -5,7 +5,8 @@
 #include "SmartThings.h"
 
 #define DEBUG_ENABLED      1
-#define DEBUG_RAW_ENABLED  0
+#define DEBUG_RAW_SHORT    1
+#define DEBUG_RAW_HISTORY  0
 #define SUBMIT_TO_ST       1
 
 #define PIN_THING_RX       3
@@ -119,6 +120,7 @@ public:
 
 Queue<40> measurements;
 float lastDistance = 0;
+bool firstUpdate = true;
 
 int lastLedState = 0;
 unsigned long lastCheck = 0;
@@ -164,11 +166,16 @@ void loop() {
     if (measurements.valid()) 
     {
       float cm = (float)measurements.average() / US_ROUNDTRIP_CM;
+
+      if (lastDistance == 0) 
+      {
+        lastDistance = cm;
+      }
       
-#if DEBUG_RAW_ENABLED
+#if DEBUG_RAW_SHORT
       Serial.print("Raw: ");
       Serial.print(cm);
-
+      
       float diff = lastDistance - cm;
 
       if (diff >= 0) 
@@ -181,7 +188,8 @@ void loop() {
       }
 
       Serial.print(diff);
-      
+
+#if DEBUG_RAW_HISTORY      
       Serial.print("  :: Last 10 :: ");
       
       for (int i = max(0, measurements.size() - 10); i < measurements.size(); ++i) 
@@ -189,12 +197,13 @@ void loop() {
         Serial.print((float)measurements.values()[i] / US_ROUNDTRIP_CM);
         Serial.print(" ");
       }
-      
+#endif      
       Serial.println("");
 #endif  
 
-      if (abs(lastDistance - cm) > 0) {
+      if (fabs(lastDistance - cm) > 1.5f || firstUpdate) {
         lastDistance = cm;
+        firstUpdate = false;
 
 #if DEBUG_ENABLED       
         Serial.print("Ping: ");
@@ -223,8 +232,10 @@ void loop() {
         
         snprintf(message, sizeof(message), "level:%d", (int)cm);
         smartthing.send(message);
+
+        lastDistance = 0;
 #endif        
-      }        
+      }
     }
     
     lastCheck = time;
